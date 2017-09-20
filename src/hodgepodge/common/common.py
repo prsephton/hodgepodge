@@ -21,11 +21,11 @@ class IHodgepodge(interface.Interface):
     def __init__(self, name):
         ''' Initialise a new object with unique <name> '''
 
-    def recv(sock=None):
-        ''' Receive (who, cmd, data) from sock or the default socket '''
+    def recv(how=None):
+        ''' Receive (who, cmd, data) from socket[how] or the default socket '''
 
-    def send(cmd, data, socks=None):
-        ''' Send (me, cmd, data) to socks list or the default socket '''
+    def send(cmd, data, how=None):
+        ''' Send (me, cmd, data) to sock[how] or the default socket '''
 
     def active(running=None):
         ''' Return active status.  If running is specified, set status. '''
@@ -60,9 +60,22 @@ class Hodgepodge(SiteManagerContainer):
     _zcontext = None
     _running = False
     _stopping = 0
+    _sockets = {}
 
-    def recv(self, sock=None):
-        if sock is None: sock = self._socket
+    def _default_socket(self):
+        if zmq.REP in self._sockets:
+            return self._sockets[zmq.REP]
+        elif zmq.REQ in self._sockets:
+            return self._sockets[zmq.REQ]
+        else:
+            raise ValueError('Recv: Cannot locate an open socket')
+
+    def recv(self, how=None):
+        sock = None
+        if how in self._sockets:
+            sock = self._sockets[how]
+        if sock is None:
+            sock = self._default_socket()
         rsp = sock.recv()
         i = rsp.find(":")
         who = rsp[:i]
@@ -75,8 +88,13 @@ class Hodgepodge(SiteManagerContainer):
 
         if rsp: return rsp
 
-    def send(self, cmd, data, socks=None):
-        if socks is None: socks = [self._socket]
+    def send(self, cmd, data, how=None):
+        socks = []
+        if how in self._sockets:
+            socks = [self._sockets[how]]
+        if socks is None:
+            socks = [self._default_socket()]
+
         for s in socks:
             if type(data) is unicode:
                 s.send_string("%s:%s:%s" % (self.__name__, cmd, data))
@@ -95,25 +113,28 @@ class Hodgepodge(SiteManagerContainer):
         self._serve = serve
 
     def connect(self, source, how):
-        self._socket = self._zcontext.socket(how)
-        self._socket.connect(source)
+        self._sockets[how] = self._zcontext.socket(how)
+        self._sockets[how].connect(source)
 
     def bind(self, how):
-        self._socket = self._zcontext.socket(how)
-        self._socket.bind(self._serve)
+        self._sockets[how] = self._zcontext.socket(how)
+        self._sockets[how].bind(self._serve)
 
     def getPoller(self):
         poller = zmq.Poller()
-        poller.register(self._socket, zmq.POLLIN)
+        for s in self._sockets.values():
+            poller.register(s, zmq.POLLIN)
         return poller
 
     def poll_socket(self, poller, timeout=100):
         socks = dict(poller.poll(timeout))
-        if self.stopping():
+        if self._stopping or not self._running:
             return []
-        if self._socket in socks and socks[self._socket] == zmq.POLLIN:
-            return [self._socket]
-        return []
+        return [s for s, i in socks.items() if i == zmq.POLLIN]
+
+#         if self._socket in socks and socks[self._socket] == zmq.POLLIN:
+#             return [self._socket]
+#         return []
 
     def stopping(self, stop=None):
         if stop: self._stopping = 5
@@ -126,7 +147,8 @@ class Hodgepodge(SiteManagerContainer):
 
     def close(self):
         self._running = False
-        self._socket.close()
+        for s in self._sockets.values():
+            s.close()
 
     def __init__(self, name):
         ''' A registry has a name '''
