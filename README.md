@@ -8,3 +8,4 @@ Some use cases:
 	3. Implementing data caches
 	4. Event driven publish/subscribe
 
+Status:  Very much still work in progress
