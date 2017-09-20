@@ -7,4 +7,6 @@ downloads
 lib
 build
 dist
-
+.project
+.pydevproject
+*~
