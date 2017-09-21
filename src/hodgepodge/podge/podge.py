@@ -128,6 +128,7 @@ class Podge(Hodgepodge):
                 poll(self)
 
     def stop(self):
+        log.debug("'%s': calling close()" % self.__name__)
         self.close()
 
 
@@ -168,8 +169,9 @@ if __name__ == '__main__':
     Test if we can run and stop the server in the foreground
 
         >>> def poll(ob):
-        ...    print ("stopping")
-        ...    ob.stop()
+        ...    if ob.active() and not ob.stopping():
+        ...       print ("stopping")
+        ...       ob.active(False)
         >>> p = Podge('joe')
         >>> p.run(poll=poll)
         stopping

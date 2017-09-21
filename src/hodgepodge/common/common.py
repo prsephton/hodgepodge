@@ -15,6 +15,11 @@ from zope import component, interface
 from zope.site import LocalSiteManager, SiteManagerContainer
 from hodgepodge import site
 
+import logging
+log = logging.getLogger('common')
+log.addHandler(logging.StreamHandler())
+log.level = logging.INFO
+
 class IHodgepodge(interface.Interface):
     ''' A Hodgepodge general interface '''
 
@@ -60,7 +65,7 @@ class Hodgepodge(SiteManagerContainer):
     _zcontext = None
     _running = False
     _stopping = 0
-    _sockets = {}
+    _sockets = None
 
     def _default_socket(self):
         if zmq.REP in self._sockets:
@@ -76,30 +81,35 @@ class Hodgepodge(SiteManagerContainer):
             sock = self._sockets[how]
         if sock is None:
             sock = self._default_socket()
-        rsp = sock.recv()
-        i = rsp.find(":")
-        who = rsp[:i]
-        data = rsp[i+1:]
-        i = data.find(":")
-        if i<0: return (who, '', data)
-        cmd = data[:i]
-        data = data[i+1:]
-        return (who, cmd, data)
+        for iter in range(3):
+            try:
+                rsp = sock.recv()
+                if rsp is None:
+                    raise ValueError(u"0MQ RECEIVE FAILED")
+                i = rsp.find(":")
+                who = rsp[:i]
+                data = rsp[i+1:]
+                i = data.find(":")
+                if i<0: return (who, '', data)
+                cmd = data[:i]
+                data = data[i+1:]
+                return (who, cmd, data)
+            except Exception, e:
+                log.error("{}: Cannot receive: {}".format(self.__name__, str(e)))
 
-        if rsp: return rsp
 
     def send(self, cmd, data, how=None):
-        socks = []
+        sock = None
         if how in self._sockets:
-            socks = [self._sockets[how]]
-        if socks is None:
-            socks = [self._default_socket()]
+            sock = self._sockets[how]
+        if sock is None:
+            sock = self._default_socket()
 
-        for s in socks:
+        if sock is not None:
             if type(data) is unicode:
-                s.send_string("%s:%s:%s" % (self.__name__, cmd, data))
+                sock.send_string("%s:%s:%s" % (self.__name__, cmd, data))
             else:
-                s.send("%s:%s:%s" % (self.__name__, cmd, data))
+                sock.send("%s:%s:%s" % (self.__name__, cmd, data))
 
     def active(self, running=None):
         if running is not None:
@@ -128,7 +138,7 @@ class Hodgepodge(SiteManagerContainer):
 
     def poll_socket(self, poller, timeout=100):
         socks = dict(poller.poll(timeout))
-        if self._stopping or not self._running:
+        if self.stopping() or not self._running:
             return []
         return [s for s, i in socks.items() if i == zmq.POLLIN]
 
@@ -137,18 +147,25 @@ class Hodgepodge(SiteManagerContainer):
 #         return []
 
     def stopping(self, stop=None):
-        if stop: self._stopping = 5
+        if stop is not None and self._stopping==0:
+            self._stopping = 5
         if self._stopping > 0:
+            log.debug('Stopping: %s' % self._stopping)
             self._stopping -= 1
             if self._stopping==0:
-                self._running = False
+                log.debug('{}: stopping delay complete'.format(self.__name__))
+                self.close()
             return True
         return False
 
     def close(self):
-        self._running = False
-        for s in self._sockets.values():
-            s.close()
+        if self.active():
+            log.debug('{}: Terminating sockets'.format(self.__name__))
+            self._running = False
+            self._stopping = 0
+            for s in self._sockets.values():
+                s.close()
+            log.debug('{}: Terminating sockets complete'.format(self.__name__))
 
     def __init__(self, name):
         ''' A registry has a name '''
@@ -156,6 +173,7 @@ class Hodgepodge(SiteManagerContainer):
         super(Hodgepodge, self).__init__()
         self.__name__ = name
         self._zcontext = zmq.Context()
+        self._sockets = {}
         sm = LocalSiteManager(self)
         self.setSiteManager(sm)
         self.setSite()

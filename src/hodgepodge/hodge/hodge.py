@@ -120,7 +120,7 @@ class Hodge(Hodgepodge):
             IFace = IFace[0]
             log.debug("'%s': calling adapter %s[%s](%s; %s)" % (self.__name__, IFace, name, args, kwargs))
             payload = dill.dumps([IFace, name, args[1:], kwargs])
-            self.send('adapt', payload, socks=None)
+            self.send('adapt', payload, how=zmq.REP)
             who, cmd, payload = self.recv()
             log.debug("'%s': received a response from %s" % (self.__name__, who))
             if cmd == 'adapt':
@@ -145,7 +145,7 @@ class Hodge(Hodgepodge):
         log.debug("'%s': calling utility %s[%s].%s(%s; %s)" % (self.__name__, IFace, name, meth, args, kwargs))
 
         payload = dill.dumps([IFace, name, meth, args, kwargs])
-        self.send('call', payload, socks=None)
+        self.send('call', payload, how=zmq.REQ)
         who, cmd, payload = self.recv()
         log.debug("'%s': received a response from %s" % (self.__name__, who))
         if cmd=='err':
