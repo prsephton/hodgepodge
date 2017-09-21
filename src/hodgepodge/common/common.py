@@ -127,8 +127,9 @@ class Hodgepodge(SiteManagerContainer):
         self._sockets[how].connect(source)
 
     def bind(self, how):
-        self._sockets[how] = self._zcontext.socket(how)
-        self._sockets[how].bind(self._serve)
+        if self._serve is not None:
+            self._sockets[how] = self._zcontext.socket(how)
+            self._sockets[how].bind(self._serve)
 
     def getPoller(self):
         poller = zmq.Poller()
