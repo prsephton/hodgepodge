@@ -61,7 +61,7 @@ class Podge(Hodgepodge):
             sm = self.getSiteManager()
             synch = dict(adapters=sm.adapters._adapters, utilities=sm.utilities._adapters)
             result = dill.dumps(synch)
-            self.send('sync', result)
+            self.send('sync', result, how=zmq.REP)
             log.debug("'%s': sent repo" % self.__name__)
         elif cmd == 'adapt':
             [Iface, aname, args, kwargs] = dill.loads(payload)
@@ -74,40 +74,40 @@ class Podge(Hodgepodge):
                     args = args[0]
                     ob = sm.queryAdapter(args, Iface, name=aname)
                 payload = dill.dumps(ob)
-                self.send('adapt', payload)
+                self.send('adapt', payload, how=zmq.REP)
                 log.debug("'%s': sent adapted item %s(%s)[name=%s]" % (self.__name__, Iface, args, aname))
             except Exception, e:
-                self.send('err', ': Adapter call failed %s[%s] not found' % (Iface, aname))
+                self.send('err', ': Adapter call failed %s[%s] not found' % (Iface, aname), how=zmq.REP)
         elif cmd == 'call':
             [Iface, utname, meth, args, kwargs] = dill.loads(payload)
             log.debug("'%s': read call: [%s]" % (self.__name__, args))
             sm = self.getSiteManager()
             ut = sm.queryUtility(Iface, utname, None)
             if ut is None:
-                self.send('err', ': Utility %s[%s] not found' % (Iface, utname))
+                self.send('err', ': Utility %s[%s] not found' % (Iface, utname), how=zmq.REP)
             else:
                 m = getattr(ut, meth, None)
                 if m is None:
-                    self.send('err', ': %s[%s].%s: Method not found' % (Iface, utname, meth))
+                    self.send('err', ': %s[%s].%s: Method not found' % (Iface, utname, meth), how=zmq.REP)
                 else:
                     try:
                         ret = m(*args, **kwargs)
                         payload = dill.dumps([ret, ut])
                         log.debug("'%s': returning from call" % (self.__name__))
-                        self.send('call', payload)
+                        self.send('call', payload, how=zmq.REP)
                     except Exception, e:
                         log.debug("'%s': error in call: %s" % (self.__name__, str(e)))
-                        self.send('err', ': %s[%s].%s: Error in call %s' % (Iface, utname, meth, str(e)))
+                        self.send('err', ': %s[%s].%s: Error in call %s' % (Iface, utname, meth, str(e)), how=zmq.REP)
         elif cmd == 'stop':
             if self._can_terminate:
                 log.info("'%s': received stop signal" % self.__name__)
-                self.send('stop', 'stopped')
+                self.send('stop', 'stopped', how=zmq.REP)
                 self.active(False)
             else:
-                self.send('err', ': Cannot stop this server')
+                self.send('err', ': Cannot stop this server', how=zmq.REP)
         else:
             log.error("'%s': Unknown command" % self.__name__)
-            self.send('err', '1:Unknown command')
+            self.send('err', '1:Unknown command', how=zmq.REP)
 
     def run(self, poll = None, can_stop = None, setup = None):
         ''' Run the server.  If poll is not None, we call poll(self)

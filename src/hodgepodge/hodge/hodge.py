@@ -78,7 +78,7 @@ class Hodge(Hodgepodge):
 
     def start(self):
         log.debug("'%s': sending sync" % self.__name__)
-        self.send('sync', '')
+        self.send('sync', '', how=zmq.REQ)
         who, cmd, payload = self.recv()
         log.debug("'%s': got initial repo from %s" % (self.__name__, who))
         if cmd=='err':
@@ -120,7 +120,7 @@ class Hodge(Hodgepodge):
             IFace = IFace[0]
             log.debug("'%s': calling adapter %s[%s](%s; %s)" % (self.__name__, IFace, name, args, kwargs))
             payload = dill.dumps([IFace, name, args[1:], kwargs])
-            self.send('adapt', payload, how=zmq.REP)
+            self.send('adapt', payload, how=zmq.REQ)
             who, cmd, payload = self.recv()
             log.debug("'%s': received a response from %s" % (self.__name__, who))
             if cmd == 'adapt':
@@ -165,7 +165,7 @@ class Hodge(Hodgepodge):
             return retvalue
 
     def stop_server(self):
-        self.send('stop', '')
+        self.send('stop', '', how=zmq.REQ)
         return self.recv()
 
 
