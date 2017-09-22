@@ -32,17 +32,26 @@ log.level = logging.DEBUG
 
 class IHodge(IHodgepodge):
     ''' A client- side transparent registry '''
+    def __init__(name, source='tcp://localhost:3030'):
+        ''' A Hodge registry has a name and a source '''
+
+    def start(self):
+        ''' Connect to the server, retrieve registry and continue. '''
+
+    def stop_server(self):
+        '''Send a stop signal to the server (if allowed) '''
+
 
 def proxymethod(hodgename, uname='', atype=None):
     def methwrapper(meth):
         def funcwrapper(*args, **kwargs):
             hodge = component.queryUtility(IHodge, name=hodgename)
             if atype=='utility':
-                return hodge.call_util(meth, uname, *args, **kwargs)
+                return hodge._call_util(meth, uname, *args, **kwargs)
             elif atype=='adapter':
-                return hodge.call_adapter(meth, uname, *args, **kwargs)
+                return hodge._call_adapter(meth, uname, *args, **kwargs)
             elif atype=='method':
-                return hodge.call_method(meth, uname, *args, **kwargs)
+                return hodge._call_method(meth, uname, *args, **kwargs)
         return funcwrapper
     return methwrapper
 
@@ -59,23 +68,6 @@ class Hodge(Hodgepodge):
         sm.registerUtility(self, IHodge, name)  # register local utility
         self.connect(source, zmq.REQ)
 
-
-    def reg_adapter(self, sm, adapts, spec):
-        for i, v in spec.items():
-            if type(i) is interface.interface.InterfaceClass:
-                adapts.append(i)
-                self.reg_adapter(sm, adapts, v)
-            else:
-                provides = adapts.pop()
-                v = copy(v)
-                setattr(v, '__savenew__', getattr(v, '__new__', None))
-                setattr(v, '__new__', self.proxy(v, '__new__', uname=i, atype='adapter'))
-                sm.registerAdapter(v, tuple(adapts), provides, name=i)
-#                 from hodgepodge.tests import TestUtility
-#                 from hodgepodge.interfaces import ITestIf2
-#                 q = sm.queryAdapter(TestUtility(), ITestIf2, name=u'a')
-#                 q
-
     def start(self):
         log.debug("'%s': sending sync" % self.__name__)
         self.send('sync', '', how=zmq.REQ)
@@ -87,7 +79,7 @@ class Hodge(Hodgepodge):
             sm = self.getSiteManager()
             registry = dill.loads(payload)
             for a in registry['adapters']:
-                self.reg_adapter(sm, [], a)
+                self._reg_adapter(sm, [], a)
             for u in registry['utilities']:
                 for i, v in u.items():
                     for name, ob in v.items():
@@ -98,23 +90,39 @@ class Hodge(Hodgepodge):
                             setattr(ob, '_p_sources', sources)
                             sm.unregisterUtility(old)
 
-                        self.proxy_object_methods(who, ob, i, name, 'utility')
+                        self._proxy_object_methods(who, ob, i, name, 'utility')
                         sm.registerUtility(ob, i, name=name)
 
 
-    def proxy_object_methods(self, who, ob, iface, uname, atype='utility'):
+    def stop_server(self):
+        self.send('stop', '', how=zmq.REQ)
+        return self.recv()
+
+    def _reg_adapter(self, sm, adapts, spec):
+        for i, v in spec.items():
+            if type(i) is interface.interface.InterfaceClass:
+                adapts.append(i)
+                self._reg_adapter(sm, adapts, v)
+            else:
+                provides = adapts.pop()
+                v = copy(v)
+                setattr(v, '__savenew__', getattr(v, '__new__', None))
+                setattr(v, '__new__', self._proxy(v, '__new__', uname=i, atype='adapter'))
+                sm.registerAdapter(v, tuple(adapts), provides, name=i)
+
+    def _proxy_object_methods(self, who, ob, iface, uname, atype='utility'):
         sources = getattr(ob, '_p_sources', set())
         if who not in sources: sources.add(who)  # sources of this utility
         setattr(ob, '_p_sources', sources)
 
         for method in iface.names():
             if type(iface[method]) is interface.interface.Method:
-                setattr(ob, method, self.proxy(iface, method, uname=uname))
+                setattr(ob, method, self._proxy(iface, method, uname=uname))
 
-    def proxy(self, ob, method, uname='', atype='utility'):
+    def _proxy(self, ob, method, uname='', atype='utility'):
         return types.MethodType(proxymethod(self.__name__, uname, atype)(method), ob)
 
-    def call_adapter(self, meth, name, adapter, *args, **kwargs):
+    def _call_adapter(self, meth, name, adapter, *args, **kwargs):
         IFace = list(adapter.__implemented__)
         if len(IFace):
             IFace = IFace[0]
@@ -138,10 +146,11 @@ class Hodge(Hodgepodge):
                 log.debug("'%s': adapter call failed: %s" % (self.__name__, payload))
                 raise ValueError(payload)
 
-    def call_method(self, meth, name, IFace, *args, **kwargs):
-        return self.call_util(meth, name, IFace, *args, **kwargs)
+    def _call_method(self, meth, name, IFace, *args, **kwargs):
+        log.debug("'%s': calling method %s[%s].%s(%s; %s)" % (self.__name__, IFace, name, meth, args, kwargs))
+        return self._call_util(meth, name, IFace, *args, **kwargs)
 
-    def call_util(self, meth, name, IFace, *args, **kwargs):
+    def _call_util(self, meth, name, IFace, *args, **kwargs):
         log.debug("'%s': calling utility %s[%s].%s(%s; %s)" % (self.__name__, IFace, name, meth, args, kwargs))
 
         payload = dill.dumps([IFace, name, meth, args, kwargs])
@@ -159,14 +168,10 @@ class Hodge(Hodgepodge):
             ut = sm.getUtility(IFace, name=name)
             for attr in IFace.names():
                 if type(IFace[attr]) is interface.interface.Method:
-                    setattr(ut, attr, self.proxy(IFace, attr, uname=name, atype='utility'))
+                    setattr(ut, attr, self._proxy(IFace, attr, uname=name, atype='utility'))
                 else:
                     setattr(ut, attr, getattr(ob, attr, None))
             return retvalue
-
-    def stop_server(self):
-        self.send('stop', '', how=zmq.REQ)
-        return self.recv()
 
 
 if __name__ == '__main__':
