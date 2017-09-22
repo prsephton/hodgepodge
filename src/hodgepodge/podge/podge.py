@@ -30,6 +30,17 @@ log.level = logging.DEBUG
 class IPodge(IHodgepodge):
     ''' A client- side transparent registry '''
 
+    def __init__(name, serve="tcp://*:3030"):
+        ''' A Podge registry has a name and may listen for connections '''
+
+    def run(poll = None, can_stop = None, setup = None):
+        ''' Run the server.  If poll is not None, we call poll(self)
+            with each iteration.
+        '''
+
+    def stop():
+        ''' Stops the Podge and closes socket connections '''
+
 
 class Podge(Hodgepodge):
     ''' A Podge server synchronises it's component registry with all
